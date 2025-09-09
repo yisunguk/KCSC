@@ -1,0 +1,92 @@
+# ---- OS / Editor junk ----
+.DS_Store
+Thumbs.db
+Icon?
+ehthumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+*.env
+*.env.*
+.python-version
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
+.pytype/
+
+# ---- Notebooks ----
+.ipynb_checkpoints/
+
+# ---- Build / Dist ----
+build/
+dist/
+wheelhouse/
+*.spec
+
+# ---- Logs / Temp / Artifacts ----
+logs/
+*.log
+tmp/
+temp/
+.cache/
+.cache-*/
+**/__temp__/
+**/.stash/
+
+# ---- Project data (optional: keep code-only repo) ----
+uploads/
+data/
+*.csv
+*.xlsx
+*.zip
+*.tar
+*.bak
+
+# ---- Streamlit ----
+# DO NOT commit secrets; allow optional config file only
+.streamlit/*
+!.streamlit/config.toml
+!.streamlit/README.md
+
+# ---- Google / Firebase credentials (critical) ----
+# Service account keys and local secrets must never be committed
+*service_account*.json
+*firebase*.json
+*firestore*.json
+secrets.toml
+*.pem
+*.crt
+corp-ca.crt
+cacert-with-corp.pem
+
+# ---- Images generated during testing ----
+**/output/
+**/exports/
+*.png
+*.jpg
+*.jpeg
+*.heic
+*.heif
+
+# ---- Node (if ever used for tooling) ----
+node_modules/
+npm-debug.log*
+yarn-error.log*
