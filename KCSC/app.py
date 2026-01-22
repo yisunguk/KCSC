@@ -406,9 +406,10 @@ if user_input := st.chat_input("질문을 입력하세요"):
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant explaining construction standards."},
                         {"role": "user", "content": final_prompt}
-                    ]
+                    ],
+                    stream=True
                 )
-                st.markdown(response.choices[0].message.content)
+                st.write_stream(response)
                 st.info(f"출처: {doc_name or code_name} (KCSC {target_doc_type} / {code})")
 
                 with st.expander("🔎 검색 후보 보기"):
