@@ -26,7 +26,7 @@ client = AzureOpenAI(
 class KCSCBot:
     def __init__(self, api_key):
         self.api_key = api_key
-        self.base_url = "https://www.kcsc.re.kr/api"
+        self.base_url = "https://www.kcsc.re.kr/OpenApi"
 
     def get_search_keyword(self, user_query):
         """질문에서 KCSC 검색에 적합한 단어 1~2개 추출"""
@@ -50,10 +50,6 @@ class KCSCBot:
     def search_codes(self, keyword):
         """검색어로 KDS/KCS 목록 조회"""
         params = {
-            "apiKey": self.api_key, # Try apiKey again as per original code, but maybe it needs to be 'Key'? 
-            # Let's try sending BOTH or just apiKey first with debug. 
-            # Actually, the user's original code used apiKey and got 401. 
-            # Let's try 'Key' with /api/SearchList.
             "Key": self.api_key,
             "searchWord": keyword,
             "pageSize": 5,
@@ -64,10 +60,24 @@ class KCSCBot:
             res.raise_for_status()
             return res.json().get('list', [])
         except requests.exceptions.RequestException as e:
-            st.error(f"API Request Error (Search): {e}")
+            st.error(f"API Request Error (SearchList): {e}")
             if 'res' in locals():
                 st.error(f"Status Code: {res.status_code}")
-                st.text(f"Response Text: {res.text[:500]}") # Print first 500 chars
+                st.text(f"Response Text: {res.text[:500]}")
+            
+            # Fallback: Check if Key is valid using CodeList
+            st.warning("SearchList failed. Testing API Key with CodeList endpoint...")
+            test_params = {"Key": self.api_key, "Type": "KDS", "Code": "14 20 50"}
+            try:
+                test_res = requests.get(f"{self.base_url}/CodeList", params=test_params)
+                test_res.raise_for_status()
+                st.success("CodeList endpoint worked! The API Key is valid, but SearchList endpoint might be incorrect or unavailable.")
+                st.json(test_res.json())
+            except Exception as test_e:
+                st.error(f"CodeList also failed: {test_e}")
+                if 'test_res' in locals():
+                    st.text(f"Test Response: {test_res.text[:500]}")
+            
             return []
         except ValueError:
             st.error("API Response Error: Invalid JSON")
