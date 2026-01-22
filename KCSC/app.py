@@ -3,6 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 from openai import AzureOpenAI
 import time
+import re
+from difflib import SequenceMatcher
 from typing import Optional, Dict, Tuple, List, Any
 
 # =========================
@@ -25,19 +27,12 @@ client = AzureOpenAI(
     azure_endpoint=AZURE_OPENAI_ENDPOINT
 )
 
-
-# =========================
-# 2) KCSC Client
-# =========================
 class KCSCBot:
     """
     KCSC OpenAPI (국가건설기준센터) 연동 클라이언트
 
-    - CodeList / CodeViewer는 JSON 응답
-    - 검색 전용 엔드포인트(SearchList 등)가 불확실/비공식일 수 있어,
-      1) CodeList로 전체 코드 목록을 가져오고(캐시)
-      2) 이름(Name) 기반 로컬 검색
-      3) CodeViewer로 본문을 가져옴
+    - /OpenApi/CodeList : 코드 목록(JSON)
+    - /OpenApi/CodeViewer : 코드 본문(JSON)
     """
 
     def __init__(self, api_key: str):
@@ -51,7 +46,6 @@ class KCSCBot:
             "Accept": "application/json, text/plain;q=0.9, */*;q=0.8",
         })
 
-    # ---------- Utilities ----------
     @staticmethod
     def _strip_html(s: str) -> str:
         if not s:
@@ -63,21 +57,18 @@ class KCSCBot:
 
     @staticmethod
     def _redact_key(text: str, key: str) -> str:
-        if not key:
-            return text
-        return text.replace(key, "***REDACTED***")
+        return (text or "").replace(key, "***REDACTED***") if key else (text or "")
+
+    @staticmethod
+    def _get_first(item: Dict[str, Any], keys: List[str], default: str = "") -> str:
+        for k in keys:
+            if k in item and item.get(k) not in (None, ""):
+                return str(item.get(k))
+        return default
 
     def _get_json(self, endpoint: str, params: Optional[Dict[str, Any]] = None, *, path: Optional[str] = None) -> Any:
-        """
-        endpoint: 'CodeList' | 'CodeViewer' ...
-        path: endpoint 대신 전체 path를 지정할 때 사용 (예: 'CodeViewer/KDS/101000')
-        """
-        if path:
-            url = f"{self.base_url}/{path}"
-        else:
-            url = f"{self.base_url}/{endpoint}"
+        url = f"{self.base_url}/{path}" if path else f"{self.base_url}/{endpoint}"
 
-        # ✅ 인증키 파라미터는 `key`(소문자)로 세팅
         params = dict(params or {})
         params.setdefault("key", self.api_key)
 
@@ -86,7 +77,6 @@ class KCSCBot:
 
         text = (res.text or "").lstrip()
 
-        # HTML이 오면 API 실패로 간주
         if text.lower().startswith("<!doctype html") or text.lower().startswith("<html"):
             snippet = self._redact_key(text[:500], self.api_key)
             raise RuntimeError(
@@ -110,7 +100,8 @@ class KCSCBot:
     def get_search_keyword(self, user_query: str) -> str:
         prompt = (
             f"사용자 질문: '{user_query}'\n"
-            "위 질문에서 설계기준 검색에 필요한 핵심 명사 1~2개만 뽑아 공백으로 구분해 출력해.\n"
+            "국가건설기준 검색용 핵심 단어를 1~3개만 뽑아 공백으로 구분해 출력해.\n"
+            "너무 긴 합성어 대신 기준서 제목에 들어갈 법한 단어를 사용해. 예: 피복두께 염해 내구성\n"
             "설명/문장/따옴표/특수문자 없이 단어만."
         )
         try:
@@ -122,18 +113,14 @@ class KCSCBot:
                 ]
             )
             keyword = response.choices[0].message.content.strip().splitlines()[0]
-            keyword = keyword.replace("-", " ").replace("/", " ").strip()
+            keyword = re.sub(r"[^0-9A-Za-z가-힣\s]", " ", keyword)
             keyword = " ".join(keyword.split())
             return keyword if keyword else user_query
-        except Exception as e:
-            st.warning(f"검색어 추출 실패(LLM). 원문 질문으로 검색합니다. ({type(e).__name__})")
+        except Exception:
             return user_query
 
     # ---------- Code List / Search ----------
     def get_code_list(self, doc_type: str = "KDS") -> List[Dict[str, Any]]:
-        """
-        CodeList는 전체 코드 목록을 반환. 캐시 후 로컬 검색 권장.
-        """
         cache_key = f"kcsc_codelist_{doc_type}"
         ts_key = f"{cache_key}_ts"
         now = time.time()
@@ -144,7 +131,6 @@ class KCSCBot:
                 return st.session_state[cache_key]
 
         data = self._get_json("CodeList", params={"Type": doc_type})
-
         if not isinstance(data, list):
             raise RuntimeError(f"CodeList 응답 형식이 예상과 다릅니다: {type(data)}")
 
@@ -152,41 +138,107 @@ class KCSCBot:
         st.session_state[ts_key] = now
         return data
 
+    def _normalize_tokens(self, keyword: str) -> List[str]:
+        raw = [t for t in keyword.split() if t]
+        expanded: List[str] = []
+
+        strip_patterns = [
+            (r"^(최소|최대|기준|규정|설계|시공|내구|내구성|환경|노출|조건)", ""),
+            (r"(기준|규정|환경|노출|조건)$", ""),
+            (r"(철근콘크리트|콘크리트|철근)$", ""),
+        ]
+
+        for t in raw:
+            t0 = t
+            for pat, rep in strip_patterns:
+                t0 = re.sub(pat, rep, t0)
+            t0 = t0.strip()
+            if t0 and t0 not in raw:
+                expanded.append(t0)
+
+            if "피복두께" in t:
+                expanded += ["피복두께", "피복"]
+            if "염해" in t:
+                expanded += ["염해", "해안"]
+            if "해안" in t:
+                expanded += ["해안", "염해"]
+            if "내구" in t:
+                expanded += ["내구", "내구성"]
+            if "철근콘크리트" in t or "RC" in t.upper():
+                expanded += ["철근콘크리트", "콘크리트", "철근"]
+
+        tokens = raw + expanded
+        uniq: List[str] = []
+        for t in tokens:
+            t = t.strip()
+            if len(t) < 2:
+                continue
+            if t not in uniq:
+                uniq.append(t)
+        return uniq
+
     def search_codes_local(self, keyword: str, doc_type: str = "KDS", top_k: int = 10) -> List[Dict[str, Any]]:
-        """
-        CodeList를 가져온 뒤 Name 기반 로컬 검색
-        """
         items = self.get_code_list(doc_type=doc_type)
-        tokens = [t for t in keyword.split() if t]
+        tokens = self._normalize_tokens(keyword)
 
-        def name_of(item: Dict[str, Any]) -> str:
-            return str(item.get("Name") or item.get("name") or "")
+        name_keys = ["Name", "name", "TITLE", "Title", "code_nm", "codeName", "CodeName", "KNAME", "KName"]
+        code_keys = ["Code", "code", "CODE", "target_code", "targetCode"]
 
-        def score(item: Dict[str, Any]) -> int:
-            name = name_of(item)
+        def get_name(it: Dict[str, Any]) -> str:
+            return self._get_first(it, name_keys, default="")
+
+        def get_code(it: Dict[str, Any]) -> str:
+            return self._get_first(it, code_keys, default="")
+
+        def score_contains(it: Dict[str, Any]) -> int:
+            name = get_name(it)
+            if not name:
+                return 0
             name_l = name.lower()
             s = 0
             for t in tokens:
                 if t.lower() in name_l:
                     s += 10
-            if " ".join(tokens).lower() == name_l.strip():
-                s += 50
+            compact = " ".join(tokens).lower()
+            if compact and compact in name_l:
+                s += 20
             return s
 
-        ranked = sorted(items, key=score, reverse=True)
-        ranked = [x for x in ranked if score(x) > 0]
-        return ranked[:top_k]
+        ranked = sorted(items, key=score_contains, reverse=True)
+        ranked = [x for x in ranked if score_contains(x) > 0]
+
+        if not ranked:
+            key_compact = "".join(tokens) if tokens else keyword
+
+            def ratio(it: Dict[str, Any]) -> float:
+                name = get_name(it)
+                if not name:
+                    return 0.0
+                return SequenceMatcher(None, key_compact.lower(), name.lower()).ratio()
+
+            fuzzy = sorted(items, key=ratio, reverse=True)
+            fuzzy = [x for x in fuzzy if ratio(x) >= 0.25]
+            ranked = fuzzy
+
+        cleaned: List[Dict[str, Any]] = []
+        for it in ranked:
+            if get_code(it).strip():
+                cleaned.append(it)
+            if len(cleaned) >= top_k:
+                break
+
+        st.session_state["__last_tokens__"] = tokens
+        st.session_state["__last_top_preview__"] = [
+            {"name": self._get_first(it, name_keys, ""), "code": self._get_first(it, code_keys, "")}
+            for it in cleaned[:10]
+        ]
+        return cleaned
 
     # ---------- Code Viewer ----------
     def get_content(self, code: str, doc_type: str = "KDS") -> Tuple[str, str]:
-        """
-        return (code_name, content_text)
-        """
-        # 1) 쿼리 파라미터 방식
         try:
             data = self._get_json("CodeViewer", params={"Type": doc_type, "Code": code})
         except Exception:
-            # 2) 경로 방식 fallback
             data = self._get_json("", params={}, path=f"CodeViewer/{doc_type}/{code}")
 
         code_name = str(data.get("Name") or data.get("name") or "")
@@ -219,9 +271,20 @@ bot = KCSCBot(KCSC_API_KEY)
 
 with st.sidebar:
     st.subheader("검색 설정")
-    doc_type = st.selectbox("기준 종류(Type)", ["KDS", "KCS", "EXCS"], index=0)
+    doc_type = st.selectbox("기준 종류(Type)", ["KDS", "KCS", "EXCS"], index=1)
     top_k = st.slider("검색 후보 개수", 3, 30, 10, 1)
+    debug = st.checkbox("디버그 보기", value=False)
     st.caption("※ 첫 실행 시 CodeList를 불러와 캐시합니다(최대 수 초).")
+
+if debug:
+    with st.sidebar.expander("디버그: CodeList 샘플/필드 확인", expanded=False):
+        try:
+            sample = bot.get_code_list(doc_type=doc_type)[:3]
+            st.write("샘플 3개:", sample)
+            if sample:
+                st.write("첫 항목 키:", list(sample[0].keys()))
+        except Exception as e:
+            st.error(f"CodeList 로드 실패: {type(e).__name__}: {e}")
 
 if user_input := st.chat_input("질문을 입력하세요"):
     with st.chat_message("user"):
@@ -230,24 +293,26 @@ if user_input := st.chat_input("질문을 입력하세요"):
     with st.chat_message("assistant"):
         with st.status("KCSC 데이터를 실시간으로 분석 중...", expanded=True) as status:
             try:
-                # 1) 검색어 추출
                 keyword = bot.get_search_keyword(user_input)
                 st.write(f"🔍 검색어 추출: **{keyword}**")
 
-                # 2) 코드 검색(로컬)
                 results = bot.search_codes_local(keyword, doc_type=doc_type, top_k=top_k)
+
+                if debug:
+                    st.write("🔧 디버그 토큰:", st.session_state.get("__last_tokens__", []))
+                    st.write("🔧 상위 후보 미리보기:", st.session_state.get("__last_top_preview__", []))
 
                 if not results:
                     st.error("관련 기준(코드)을 찾지 못했습니다. 검색어를 바꿔서 다시 시도해보세요.")
+                    st.info("추천 검색어 예: '피복두께', '염해', '내구성', '철근콘크리트 피복'")
                     status.update(label="분석 완료", state="complete")
                     st.stop()
 
                 best = results[0]
-                code = str(best.get("Code") or best.get("code") or "")
-                code_name = str(best.get("Name") or best.get("name") or "Unknown")
+                code = str(best.get("Code") or best.get("code") or best.get("CODE") or best.get("target_code") or best.get("targetCode") or "")
+                code_name = str(best.get("Name") or best.get("name") or best.get("TITLE") or best.get("Title") or best.get("code_nm") or "Unknown")
                 st.write(f"📖 관련 기준 발견: **{code_name}** (Code: {code})")
 
-                # 3) 본문 조회
                 status.update(label="기준 본문 조회 중...", state="running")
                 doc_name, content = bot.get_content(code, doc_type=doc_type)
 
@@ -256,7 +321,6 @@ if user_input := st.chat_input("질문을 입력하세요"):
                     status.update(label="분석 완료", state="complete")
                     st.stop()
 
-                # 4) LLM 답변 생성
                 status.update(label="답변 생성 중...", state="running")
                 final_prompt = (
                     f"기준서 내용:\n{content[:12000]}\n\n"
@@ -275,10 +339,11 @@ if user_input := st.chat_input("질문을 입력하세요"):
                 st.markdown(response.choices[0].message.content)
                 st.info(f"출처: {doc_name or code_name} (KCSC {doc_type} / {code})")
 
-                # 후보 목록
                 with st.expander("🔎 검색 후보 보기"):
                     for i, it in enumerate(results, 1):
-                        st.write(f"{i}. {it.get('Name')} (Code: {it.get('Code')})")
+                        nm = it.get("Name") or it.get("name") or it.get("TITLE") or it.get("Title") or it.get("code_nm")
+                        cd = it.get("Code") or it.get("code") or it.get("CODE") or it.get("target_code") or it.get("targetCode")
+                        st.write(f"{i}. {nm} (Code: {cd})")
 
             except Exception as e:
                 st.error(f"실행 중 오류: {type(e).__name__}: {e}")
