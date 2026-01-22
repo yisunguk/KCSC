@@ -52,7 +52,6 @@ class KCSCBot:
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Streamlit; KCSC-Client)",
             "Accept": "application/json, text/plain;q=0.9, */*;q=0.8",
-            "X-Api-Key": self.api_key,  # fallback
         })
 
     # ---------- Utilities ----------
@@ -81,8 +80,6 @@ class KCSCBot:
         url = f"{self.base_url}/{path}" if path else f"{self.base_url}/{endpoint}"
 
         params = dict(params or {})
-        # ✅ 인증키는 Key(대문자)로 문서에 표기됨. 서버 구현이 케이스 민감할 수 있어 둘 다 넣음.
-        params.setdefault("Key", self.api_key)
         params.setdefault("key", self.api_key)
 
         res = self.session.get(url, params=params, timeout=25)
