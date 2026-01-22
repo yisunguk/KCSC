@@ -2,6 +2,9 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from openai import AzureOpenAI
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- 1. 초기 설정 ---
 try:
@@ -47,6 +50,19 @@ class KCSCBot:
             st.error(f"Error generating search keyword: {e}")
             return user_query
 
+    def mock_search(self, keyword):
+        """API 권한 문제 시 테스트를 위한 모의 검색 결과 반환"""
+        mock_data = {
+            "콘크리트": [{"code_nm": "콘크리트구조 설계기준", "target_code": "KDS 14 20 00"}],
+            "피복두께": [{"code_nm": "콘크리트구조 철근상세 설계기준", "target_code": "KDS 14 20 50"}],
+            "이음": [{"code_nm": "콘크리트구조 철근상세 설계기준", "target_code": "KDS 14 20 50"}],
+            "정착": [{"code_nm": "콘크리트구조 철근상세 설계기준", "target_code": "KDS 14 20 50"}]
+        }
+        for key, results in mock_data.items():
+            if key in keyword:
+                return results
+        return []
+
     def search_codes(self, keyword):
         """검색어로 KDS/KCS 목록 조회"""
         params = {
@@ -56,40 +72,36 @@ class KCSCBot:
             "pageNum": 1
         }
         try:
-            res = requests.get(f"{self.base_url}/SearchList", params=params)
+            res = requests.get(f"{self.base_url}/SearchList", params=params, verify=False) # Disable SSL verify for testing
             res.raise_for_status()
             return res.json().get('list', [])
         except requests.exceptions.RequestException as e:
             st.error(f"API Request Error (SearchList): {e}")
             if 'res' in locals():
                 st.error(f"Status Code: {res.status_code}")
-                st.text(f"Response Text: {res.text[:500]}")
+                # Try to parse as text/html if JSON fails
+                try:
+                    st.text(f"Response Text: {res.text[:500]}")
+                except:
+                    pass
             
-            # Fallback: Check if Key is valid using CodeList
-            st.warning("SearchList failed. Testing API Key with CodeList endpoint...")
-            test_params = {"Key": self.api_key, "Type": "KDS", "Code": "14 20 50"}
-            try:
-                test_res = requests.get(f"{self.base_url}/CodeList", params=test_params)
-                test_res.raise_for_status()
-                st.success("CodeList endpoint worked! The API Key is valid, but SearchList endpoint might be incorrect or unavailable.")
-                st.json(test_res.json())
-            except Exception as test_e:
-                st.error(f"CodeList also failed: {test_e}")
-                if 'test_res' in locals():
-                    st.text(f"Test Response: {test_res.text[:500]}")
-            
-            return []
+            # Fallback to Mock Search
+            st.warning("⚠️ 검색 API 호출 실패 (권한 또는 엔드포인트 문제). 데모를 위해 모의 데이터를 사용합니다.")
+            return self.mock_search(keyword)
+
         except ValueError:
-            st.error("API Response Error: Invalid JSON")
+            st.error("API Response Error: Invalid JSON (HTML/XML received?)")
             if 'res' in locals():
                 st.text(f"Response Text: {res.text[:500]}")
-            return []
+            
+            st.warning("⚠️ 검색 API 응답 형식 오류. 데모를 위해 모의 데이터를 사용합니다.")
+            return self.mock_search(keyword)
 
     def get_content(self, target_code):
         """특정 코드의 상세 내용 가져오기 및 HTML 정리"""
         params = {"Key": self.api_key, "targetCode": target_code}
         try:
-            res = requests.get(f"{self.base_url}/CodeViewer", params=params)
+            res = requests.get(f"{self.base_url}/CodeViewer", params=params, verify=False)
             res.raise_for_status()
             html_content = res.json().get('content', '')
             
