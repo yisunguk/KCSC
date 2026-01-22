@@ -26,7 +26,7 @@ client = AzureOpenAI(
 class KCSCBot:
     def __init__(self, api_key):
         self.api_key = api_key
-        self.base_url = "https://www.kcsc.re.kr/api"
+        self.base_url = "https://www.kcsc.re.kr/OpenApi"
 
     def get_search_keyword(self, user_query):
         """질문에서 KCSC 검색에 적합한 단어 1~2개 추출"""
@@ -50,7 +50,7 @@ class KCSCBot:
     def search_codes(self, keyword):
         """검색어로 KDS/KCS 목록 조회"""
         params = {
-            "apiKey": self.api_key,
+            "Key": self.api_key,
             "searchWord": keyword,
             "pageSize": 5,
             "pageNum": 1
@@ -68,7 +68,7 @@ class KCSCBot:
 
     def get_content(self, target_code):
         """특정 코드의 상세 내용 가져오기 및 HTML 정리"""
-        params = {"apiKey": self.api_key, "targetCode": target_code}
+        params = {"Key": self.api_key, "targetCode": target_code}
         try:
             res = requests.get(f"{self.base_url}/CodeViewer", params=params)
             res.raise_for_status()
