@@ -50,19 +50,6 @@ class KCSCBot:
             st.error(f"Error generating search keyword: {e}")
             return user_query
 
-    def mock_search(self, keyword):
-        """API 권한 문제 시 테스트를 위한 모의 검색 결과 반환"""
-        mock_data = {
-            "콘크리트": [{"code_nm": "콘크리트구조 설계기준", "target_code": "KDS 14 20 00"}],
-            "피복두께": [{"code_nm": "콘크리트구조 철근상세 설계기준", "target_code": "KDS 14 20 50"}],
-            "이음": [{"code_nm": "콘크리트구조 철근상세 설계기준", "target_code": "KDS 14 20 50"}],
-            "정착": [{"code_nm": "콘크리트구조 철근상세 설계기준", "target_code": "KDS 14 20 50"}]
-        }
-        for key, results in mock_data.items():
-            if key in keyword:
-                return results
-        return []
-
     def search_codes(self, keyword):
         """검색어로 KDS/KCS 목록 조회"""
         params = {
@@ -71,37 +58,32 @@ class KCSCBot:
             "pageSize": 5,
             "pageNum": 1
         }
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
         try:
-            res = requests.get(f"{self.base_url}/SearchList", params=params, verify=False) # Disable SSL verify for testing
+            # Try SearchList first
+            res = requests.get(f"{self.base_url}/SearchList", params=params, headers=headers, verify=False)
             res.raise_for_status()
             return res.json().get('list', [])
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             st.error(f"API Request Error (SearchList): {e}")
             if 'res' in locals():
                 st.error(f"Status Code: {res.status_code}")
-                # Try to parse as text/html if JSON fails
                 try:
                     st.text(f"Response Text: {res.text[:500]}")
                 except:
                     pass
-            
-            # Fallback to Mock Search
-            st.warning("⚠️ 검색 API 호출 실패 (권한 또는 엔드포인트 문제). 데모를 위해 모의 데이터를 사용합니다.")
-            return self.mock_search(keyword)
-
-        except ValueError:
-            st.error("API Response Error: Invalid JSON (HTML/XML received?)")
-            if 'res' in locals():
-                st.text(f"Response Text: {res.text[:500]}")
-            
-            st.warning("⚠️ 검색 API 응답 형식 오류. 데모를 위해 모의 데이터를 사용합니다.")
-            return self.mock_search(keyword)
+            return []
 
     def get_content(self, target_code):
         """특정 코드의 상세 내용 가져오기 및 HTML 정리"""
         params = {"Key": self.api_key, "targetCode": target_code}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
         try:
-            res = requests.get(f"{self.base_url}/CodeViewer", params=params, verify=False)
+            res = requests.get(f"{self.base_url}/CodeViewer", params=params, headers=headers, verify=False)
             res.raise_for_status()
             html_content = res.json().get('content', '')
             
