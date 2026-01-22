@@ -496,7 +496,7 @@ if not st.session_state.messages:
     st.markdown("""
         <div class="greeting-container">
             <div class="greeting-sub">✨ 사용자님, 안녕하세요</div>
-            <div class="greeting-main">무엇을<br>도와드릴까요?</div>
+            <div class="greeting-main">무엇을 도와드릴까요?</div>
         </div>
     """, unsafe_allow_html=True)
 
