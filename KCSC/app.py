@@ -1,14 +1,15 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-import google.generativeai as genai
+from openai import AzureOpenAI
 
 # --- 1. 초기 설정 ---
-# Secrets handling with fallback for local development if needed, 
-# though user specified they will put keys in secrets.
 try:
     KCSC_API_KEY = st.secrets["KCSC_API_KEY"]
-    GENAI_API_KEY = st.secrets["GENAI_API_KEY"]
+    AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
+    AZURE_OPENAI_KEY = st.secrets["AZURE_OPENAI_KEY"]
+    AZURE_OPENAI_DEPLOYMENT_NAME = st.secrets["AZURE_OPENAI_DEPLOYMENT_NAME"]
+    AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 except FileNotFoundError:
     st.error("Secrets file not found. Please set up .streamlit/secrets.toml")
     st.stop()
@@ -16,8 +17,11 @@ except KeyError as e:
     st.error(f"Missing secret: {e}")
     st.stop()
 
-genai.configure(api_key=GENAI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_KEY,
+    api_version=AZURE_OPENAI_API_VERSION,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT
+)
 
 class KCSCBot:
     def __init__(self, api_key):
@@ -28,11 +32,17 @@ class KCSCBot:
         """질문에서 KCSC 검색에 적합한 단어 1~2개 추출"""
         prompt = f"사용자 질문: '{user_query}'\n위 질문에서 설계기준 검색을 위한 핵심 명사만 추출해줘. (예: 콘크리트 피복두께)"
         try:
-            response = model.generate_content(prompt)
-            return response.text.strip()
+            response = client.chat.completions.create(
+                model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that extracts search keywords."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content.strip()
         except Exception as e:
             st.error(f"Error generating search keyword: {e}")
-            return user_query # Fallback to user query
+            return user_query
 
     def search_codes(self, keyword):
         """검색어로 KDS/KCS 목록 조회"""
@@ -42,11 +52,9 @@ class KCSCBot:
             "pageSize": 5,
             "pageNum": 1
         }
-        # 실제 API 엔드포인트는 KCSC 가이드를 참조하여 SearchList 등으로 수정 필요
-        # Assuming SearchList is the correct endpoint based on user input
         try:
             res = requests.get(f"{self.base_url}/SearchList", params=params)
-            res.raise_for_status() # Raise error for bad status codes
+            res.raise_for_status()
             return res.json().get('list', [])
         except requests.exceptions.RequestException as e:
             st.error(f"API Request Error (Search): {e}")
@@ -63,7 +71,6 @@ class KCSCBot:
             res.raise_for_status()
             html_content = res.json().get('content', '')
             
-            # HTML 태그 제거 및 텍스트만 추출 (LLM 토큰 절약)
             soup = BeautifulSoup(html_content, 'html.parser')
             return soup.get_text(separator="\n", strip=True)
         except requests.exceptions.RequestException as e:
@@ -75,7 +82,6 @@ class KCSCBot:
 # --- 2. Streamlit UI ---
 st.set_page_config(page_title="KCSC 설계기준 챗봇", layout="wide")
 
-# Initialize bot only if API key is available
 if 'KCSC_API_KEY' in locals():
     bot = KCSCBot(KCSC_API_KEY)
 
@@ -101,8 +107,7 @@ if user_input := st.chat_input("질문을 입력하세요"):
                 # 3단계: 가장 관련성 높은 상위 1개 코드의 내용 가져오기
                 best_match = search_results[0]
                 st.write(f"📖 관련 기준 발견: {best_match.get('code_nm', 'Unknown Code')}")
-                # Assuming 'target_code' is the correct key, but user code used 'target_code' 
-                # while API might return something else. Keeping user's key for now.
+                
                 target_code = best_match.get('target_code')
                 if target_code:
                     content = bot.get_content(target_code)
@@ -111,8 +116,14 @@ if user_input := st.chat_input("질문을 입력하세요"):
                     status.update(label="답변 생성 중...", state="running")
                     final_prompt = f"기준서 내용:\n{content[:4000]}\n\n질문: {user_input}\n\n위 내용을 바탕으로 질문에 답해줘."
                     try:
-                        response = model.generate_content(final_prompt)
-                        st.markdown(response.text)
+                        response = client.chat.completions.create(
+                            model=AZURE_OPENAI_DEPLOYMENT_NAME,
+                            messages=[
+                                {"role": "system", "content": "You are a helpful assistant explaining construction standards."},
+                                {"role": "user", "content": final_prompt}
+                            ]
+                        )
+                        st.markdown(response.choices[0].message.content)
                         st.info(f"출처: {best_match.get('code_nm')} ({target_code})")
                     except Exception as e:
                         st.error(f"Error generating answer: {e}")
