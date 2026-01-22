@@ -30,16 +30,19 @@ class KCSCBot:
 
     def get_search_keyword(self, user_query):
         """질문에서 KCSC 검색에 적합한 단어 1~2개 추출"""
-        prompt = f"사용자 질문: '{user_query}'\n위 질문에서 설계기준 검색을 위한 핵심 명사만 추출해줘. (예: 콘크리트 피복두께)"
+        prompt = f"사용자 질문: '{user_query}'\n위 질문에서 설계기준 검색을 위한 핵심 명사만 1~2개 추출해서 공백으로 구분해줘. 설명이나 특수문자 없이 단어만 출력해. (예: 콘크리트 피복두께)"
         try:
             response = client.chat.completions.create(
                 model=AZURE_OPENAI_DEPLOYMENT_NAME,
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant that extracts search keywords."},
+                    {"role": "system", "content": "You are a helpful assistant that extracts search keywords. Output only the keywords separated by spaces. No bullets, no explanations."},
                     {"role": "user", "content": prompt}
                 ]
             )
-            return response.choices[0].message.content.strip()
+            keyword = response.choices[0].message.content.strip()
+            # 첫 줄만 사용하고, 불필요한 특수문자 제거
+            keyword = keyword.split('\n')[0].replace('-', '').strip()
+            return keyword
         except Exception as e:
             st.error(f"Error generating search keyword: {e}")
             return user_query
