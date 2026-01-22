@@ -272,6 +272,9 @@ class KCSCBot:
     def search_codes_local(self, keyword: str, doc_type: str = "KCS", top_k: int = 10) -> List[Dict[str, Any]]:
         items = self.get_code_list(doc_type=doc_type)
         
+        # 디버그 정보 초기 저장 (Fast Track 등 조기 리턴 시에도 반영되도록 상단 이동)
+        st.session_state["__last_loaded_count__"] = len(items)
+        
         # 1) Fast Track: 코드 번호 추출
         extracted_code = self.extract_code_number(keyword)
         fast_track_results = []
@@ -296,6 +299,13 @@ class KCSCBot:
             if fast_track_results:
                 # 정확도순 정렬 (길이가 짧을수록, 즉 더 정확하게 일치할수록 우선)
                 fast_track_results.sort(key=lambda x: len(get_code(x)))
+                
+                # 디버그 정보 업데이트 (Fast Track)
+                st.session_state["__last_tokens__"] = [extracted_code]
+                st.session_state["__last_top_preview__"] = [
+                    {"name": get_name(it), "code": get_code(it)}
+                    for it in fast_track_results[:10]
+                ]
                 return fast_track_results[:top_k]
 
         # 2) 일반 키워드 검색
@@ -336,9 +346,8 @@ class KCSCBot:
             if len(cleaned) >= top_k:
                 break
 
-        # 디버그 저장
+        # 디버그 저장 (일반 검색)
         st.session_state["__last_tokens__"] = tokens
-        st.session_state["__last_loaded_count__"] = len(items)
         st.session_state["__last_top_preview__"] = [
             {"name": get_name(it), "code": get_code(it)}
             for it in cleaned[:10]
