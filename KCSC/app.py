@@ -190,11 +190,23 @@ class KCSCBot:
                 uniq.append(t)
         return uniq
 
+    def extract_code_number(self, query: str) -> Optional[str]:
+        # 14 20 10, 14.20.10, 14-20-10, 142010 등
+        # KCS 14 20 10 처럼 앞에 영문이 있을 수도 있음
+        # 단순히 연속된 숫자(공백/./- 포함)가 4자리 이상이면 코드로 의심
+        match = re.search(r"(\d{1,2}[\s\.-]?\d{2}[\s\.-]?\d{2,3})", query)
+        if match:
+            # 공백, ., - 제거하고 순수 숫자만 반환
+            return re.sub(r"[\s\.-]", "", match.group(1))
+        return None
+
     def search_codes_local(self, keyword: str, doc_type: str = "KCS", top_k: int = 10) -> List[Dict[str, Any]]:
         items = self.get_code_list(doc_type=doc_type)
-        tokens = self._normalize_tokens(keyword)
-
-        # 공식 문서 출력 필드: Code, Name 등 citeturn0search0
+        
+        # 1) Fast Track: 코드 번호 추출
+        extracted_code = self.extract_code_number(keyword)
+        fast_track_results = []
+        
         name_keys = ["Name", "name", "TITLE", "Title"]
         code_keys = ["Code", "code", "CODE", "FullCode", "fullCode"]
 
@@ -203,6 +215,22 @@ class KCSCBot:
 
         def get_code(it: Dict[str, Any]) -> str:
             return self._get_first(it, code_keys, default="")
+
+        if extracted_code:
+            # 코드 번호로 필터링 (포함 여부)
+            for it in items:
+                c = get_code(it).replace(" ", "").replace(".", "").replace("-", "")
+                if extracted_code in c:
+                    fast_track_results.append(it)
+            
+            # Fast Track 결과가 있으면 그것만 반환하거나 최상단에 배치
+            if fast_track_results:
+                # 정확도순 정렬 (길이가 짧을수록, 즉 더 정확하게 일치할수록 우선)
+                fast_track_results.sort(key=lambda x: len(get_code(x)))
+                return fast_track_results[:top_k]
+
+        # 2) 일반 키워드 검색
+        tokens = self._normalize_tokens(keyword)
 
         def score_contains(it: Dict[str, Any]) -> int:
             name = get_name(it)
@@ -250,7 +278,7 @@ class KCSCBot:
 
     # ---------- Code Viewer ----------
     def get_content(self, code: str, doc_type: str = "KCS") -> Tuple[str, str]:
-        # 문서상 요청 변수: Type, Code, Key citeturn0search0
+        # 문서상 요청 변수: Type, Code, Key
         try:
             data = self._get_json("CodeViewer", params={"Type": doc_type, "Code": code})
         except Exception:
@@ -279,6 +307,7 @@ class KCSCBot:
 
         return code_name, "\n\n".join([p for p in parts if p])
 
+
 # =========================================================
 # 3) Streamlit UI
 # =========================================================
@@ -289,8 +318,8 @@ bot = KCSCBot(KCSC_API_KEY)
 
 with st.sidebar:
     st.subheader("검색 설정")
-    # 공식 문서에는 KDS/KCS/KWCS 등이 보임. citeturn0search0
-    doc_type = st.selectbox("기준 종류(Type)", ["KDS", "KCS", "KWCS"], index=1)
+    # 공식 문서에는 KDS/KCS/KWCS 등이 보임.
+    doc_type_selected = st.selectbox("기준 종류(Type)", ["KDS", "KCS", "KWCS"], index=1)
     top_k = st.slider("검색 후보 개수", 3, 30, 18, 1)
     debug = st.checkbox("디버그 보기", value=False)
     st.caption("※ 첫 실행 시 CodeList를 불러와 캐시합니다(최대 수 초).")
@@ -298,7 +327,7 @@ with st.sidebar:
 if debug:
     with st.sidebar.expander("디버그 정보", expanded=True):
         try:
-            items = bot.get_code_list(doc_type=doc_type)
+            items = bot.get_code_list(doc_type=doc_type_selected)
             st.write("CodeList 개수:", len(items))
             if items:
                 st.write("첫 항목 키:", list(items[0].keys()))
@@ -316,7 +345,21 @@ if user_input := st.chat_input("질문을 입력하세요"):
                 keyword = bot.get_search_keyword(user_input)
                 st.write(f"🔍 검색어 추출: **{keyword}**")
 
-                results = bot.search_codes_local(keyword, doc_type=doc_type, top_k=top_k)
+                # 1) 우선 선택된 doc_type으로 검색
+                target_doc_type = doc_type_selected
+                results = bot.search_codes_local(keyword, doc_type=target_doc_type, top_k=top_k)
+
+                # 2) Auto-Retry: 결과가 없으면 다른 타입 검색
+                if not results:
+                    st.warning(f"'{target_doc_type}'에서 결과를 찾지 못했습니다. 다른 기준을 검색합니다...")
+                    other_types = [t for t in ["KDS", "KCS", "KWCS"] if t != target_doc_type]
+                    
+                    for t in other_types:
+                        results = bot.search_codes_local(keyword, doc_type=t, top_k=top_k)
+                        if results:
+                            target_doc_type = t
+                            st.success(f"'{target_doc_type}'에서 관련 기준을 발견했습니다!")
+                            break
 
                 if debug:
                     st.write("🔧 CodeList 로드 개수:", st.session_state.get("__last_loaded_count__", None))
@@ -342,7 +385,8 @@ if user_input := st.chat_input("질문을 입력하세요"):
                 st.write(f"📖 관련 기준 발견: **{code_name}** (Code: {code})")
 
                 status.update(label="기준 본문 조회 중...", state="running")
-                doc_name, content = bot.get_content(code, doc_type=doc_type)
+                # 여기서 target_doc_type을 써야 함 (Auto-Retry로 바뀌었을 수 있음)
+                doc_name, content = bot.get_content(code, doc_type=target_doc_type)
 
                 if not content.strip():
                     st.warning("기준 본문을 가져왔지만 내용이 비어 있습니다. 다른 코드로 재시도하세요.")
@@ -365,7 +409,7 @@ if user_input := st.chat_input("질문을 입력하세요"):
                     ]
                 )
                 st.markdown(response.choices[0].message.content)
-                st.info(f"출처: {doc_name or code_name} (KCSC {doc_type} / {code})")
+                st.info(f"출처: {doc_name or code_name} (KCSC {target_doc_type} / {code})")
 
                 with st.expander("🔎 검색 후보 보기"):
                     for i, it in enumerate(results, 1):
