@@ -26,7 +26,7 @@ client = AzureOpenAI(
 class KCSCBot:
     def __init__(self, api_key):
         self.api_key = api_key
-        self.base_url = "https://www.kcsc.re.kr/OpenApi"
+        self.base_url = "https://www.kcsc.re.kr/api"
 
     def get_search_keyword(self, user_query):
         """질문에서 KCSC 검색에 적합한 단어 1~2개 추출"""
@@ -50,6 +50,10 @@ class KCSCBot:
     def search_codes(self, keyword):
         """검색어로 KDS/KCS 목록 조회"""
         params = {
+            "apiKey": self.api_key, # Try apiKey again as per original code, but maybe it needs to be 'Key'? 
+            # Let's try sending BOTH or just apiKey first with debug. 
+            # Actually, the user's original code used apiKey and got 401. 
+            # Let's try 'Key' with /api/SearchList.
             "Key": self.api_key,
             "searchWord": keyword,
             "pageSize": 5,
@@ -61,9 +65,14 @@ class KCSCBot:
             return res.json().get('list', [])
         except requests.exceptions.RequestException as e:
             st.error(f"API Request Error (Search): {e}")
+            if 'res' in locals():
+                st.error(f"Status Code: {res.status_code}")
+                st.text(f"Response Text: {res.text[:500]}") # Print first 500 chars
             return []
         except ValueError:
             st.error("API Response Error: Invalid JSON")
+            if 'res' in locals():
+                st.text(f"Response Text: {res.text[:500]}")
             return []
 
     def get_content(self, target_code):
