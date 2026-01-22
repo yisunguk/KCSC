@@ -256,6 +256,11 @@ class KCSCBot:
         except Exception:
             data = self._get_json("", params={}, path=f"CodeViewer/{doc_type}/{code}")
 
+        if isinstance(data, list):
+            if not data:
+                return "", ""
+            data = data[0]
+
         code_name = str(data.get("Name") or data.get("name") or "")
         lst = data.get("List") or data.get("list") or []
 
