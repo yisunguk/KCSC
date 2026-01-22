@@ -312,7 +312,44 @@ class KCSCBot:
 # 3) Streamlit UI
 # =========================================================
 st.set_page_config(page_title="KCSC 설계기준 챗봇", layout="wide")
-st.title("🏗️ 실시간 설계기준 AI 검색")
+
+# Custom CSS for Gemini-like greeting
+st.markdown("""
+<style>
+    .greeting-container {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        margin-top: 100px;
+        margin-left: 20px;
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+    }
+    .greeting-sub {
+        font-size: 2.5rem;
+        font-weight: 500;
+        color: #6e6e6e; /* Muted color for the first line */
+        margin-bottom: 10px;
+        background: -webkit-linear-gradient(45deg, #4285f4, #9b72cb, #d96570);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: inline-block;
+    }
+    .greeting-main {
+        font-size: 3.5rem;
+        font-weight: 600;
+        color: #c4c7c5; /* Light gray for the main text */
+        line-height: 1.2;
+    }
+    /* Hide the default title if we are showing the greeting */
+    .stApp header {
+        background-color: transparent;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Remove default title to use the custom greeting
+# st.title("🏗️ 실시간 설계기준 AI 검색")
 
 bot = KCSCBot(KCSC_API_KEY)
 
@@ -335,7 +372,28 @@ if debug:
         except Exception as e:
             st.error(f"CodeList 로드 실패: {type(e).__name__}: {e}")
 
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Show greeting if history is empty
+if not st.session_state.messages:
+    st.markdown("""
+        <div class="greeting-container">
+            <div class="greeting-sub">✨ 사용자님, 안녕하세요</div>
+            <div class="greeting-main">무엇을<br>도와드릴까요?</div>
+        </div>
+    """, unsafe_allow_html=True)
+
 if user_input := st.chat_input("질문을 입력하세요"):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
     with st.chat_message("user"):
         st.markdown(user_input)
 
@@ -401,15 +459,27 @@ if user_input := st.chat_input("질문을 입력하세요"):
                     "가능하면 '근거 문장(기준서 발췌)'도 함께 제시해줘."
                 )
 
+                # 대화 기록 포함 (Context 유지)
+                messages_payload = [
+                    {"role": "system", "content": "You are a helpful assistant explaining construction standards."}
+                ]
+                # 현재 질문(user_input)은 session_state에 이미 추가됨.
+                # 이전 대화 기록만 가져오기 (마지막 항목 제외)
+                for m in st.session_state.messages[:-1]:
+                    messages_payload.append({"role": m["role"], "content": m["content"]})
+                
+                # 이번 턴의 질문(Context 포함) 추가
+                messages_payload.append({"role": "user", "content": final_prompt})
+
                 response = client.chat.completions.create(
                     model=AZURE_OPENAI_DEPLOYMENT_NAME,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant explaining construction standards."},
-                        {"role": "user", "content": final_prompt}
-                    ],
+                    messages=messages_payload,
                     stream=True
                 )
-                st.write_stream(response)
+                full_response = st.write_stream(response)
+                
+                # 응답 저장
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
                 st.info(f"출처: {doc_name or code_name} (KCSC {target_doc_type} / {code})")
 
                 with st.expander("🔎 검색 후보 보기"):

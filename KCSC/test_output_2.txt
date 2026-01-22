@@ -1,0 +1,39 @@
+--- Testing 1. type=KDS (lowercase param), key=... ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?type=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 2. No Type, key=... ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 3. With Referer, Type=KDS, key=... ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 4. serviceKey=..., Type=KDS ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&serviceKey=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 400
+Result is not a list: {'timestamp': '2026-01-22T12:08:45.894+00:00', 'status': 400, 'error': 'Bad Request', 'path': '/openApi/CodeList'}
+
+
+--- Testing 5. ServiceKey=..., Type=KDS ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&ServiceKey=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 400
+Result is not a list: {'timestamp': '2026-01-22T12:08:46.313+00:00', 'status': 400, 'error': 'Bad Request', 'path': '/openApi/CodeList'}
+
+
+--- Testing 6. Authorization Header ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS
+Status: 400
+Result is not a list: {'timestamp': '2026-01-22T12:08:46.723+00:00', 'status': 400, 'error': 'Bad Request', 'path': '/openApi/CodeList'}
+
+

@@ -1,0 +1,44 @@
+--- Testing 1. codeType=KDS ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?codeType=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 2. CodeType=KDS ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?CodeType=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 3. type=KDS ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?type=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 4. Type=KDS ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing 5. Just key ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing CodeViewer ---
+URL: https://kcsc.re.kr/OpenApi/CodeViewer?key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc&Code=14+20+10&Type=KDS
+Status: 200
+Response: 
+
+
+URL: https://kcsc.re.kr/OpenApi/CodeViewer?key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc&Code=142010&Type=KDS
+Status: 200
+Response: 

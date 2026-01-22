@@ -1,0 +1,20 @@
+--- Testing 1. Pagination ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&pageNo=1&numOfRows=10&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Headers: {'Date': 'Thu, 22 Jan 2026 12:10:34 GMT', 'Content-Type': 'application/json', 'Content-Length': '192', 'Connection': 'keep-alive', 'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0', 'Vary': 'Access-Control-Request-Headers', 'X-Content-Type-Options': 'nosniff', 'X-XSS-Protection': '1; mode=block', 'X-Frame-Options': 'DENY', 'X-Powered-By': '', 'SERVER': '', 'X-ASPNET-VERSION': ''}
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+
+--- Testing HTTP ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Response: [{"no":0,"codeType":null,"code":null,"fullCode":null,"name":null,"version":null,"updateDate":null,"list":null,"listParentCodes":[{"codeType":null,"fullCode":null,"name":null}],"message":null}]
+--- Testing 3. serviceKey + Pagination ---
+URL: https://kcsc.re.kr/OpenApi/CodeList?Type=KDS&serviceKey=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc&pageNo=1&numOfRows=10&key=-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc
+Status: 200
+Headers: {'Date': 'Thu, 22 Jan 2026 12:10:36 GMT', 'Content-Type': 'application/json', 'Content-Length': '192', 'Connection': 'keep-alive', 'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate', 'Pragma': 'no-cache', 'Expires': '0', 'Vary': 'Access-Control-Request-Headers', 'X-Content-Type-Options': 'nosniff', 'X-XSS-Protection': '1; mode=block', 'X-Frame-Options': 'DENY', 'X-Powered-By': '', 'SERVER': '', 'X-ASPNET-VERSION': ''}
+Result Count: 1
+First item sample: {'no': 0, 'codeType': None, 'code': None, 'fullCode': None, 'name': None, 'version': None, 'updateDate': None, 'list': None, 'listParentCodes': [{'codeType': None, 'fullCode': None, 'name': None}], 'message': None}
+
+

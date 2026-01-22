@@ -1,135 +1,47 @@
 import requests
-import xmltodict
-import urllib3
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import json
 
 API_KEY = "-VjbMAN7Sp_Xy0xWLZP2C6evV-Q-RQe7JQxA2Zt4EPc"
+BASE_URL = "https://kcsc.re.kr/OpenApi/CodeList"
 
-def test_user_example():
-    print("--- Testing User Example (CodeList) ---")
-    url = "https://www.kcsc.re.kr/openApi/CodeList"
-
-    params = {
-        "Key": API_KEY,
-        "Type": "KDS",
-        "Code": "142050"   # Trying a longer code
-    }
-
+def test(name, params):
+    print(f"--- Testing {name} ---")
     try:
-        # Added verify=False for local dev, and User-Agent just in case
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=False)
-        
-        print("Status:", response.status_code)
-        print("Content Start:", response.text[:1000])  # 무조건 text부터 확인
-        
-        if response.text.strip().startswith("<?xml"):
-            print("✅ XML Detected")
-            try:
-                data = xmltodict.parse(response.text)
-                print("Parsed Data Keys:", data.keys())
-            except Exception as e:
-                print(f"XML Parse Error: {e}")
-        else:
-            print("❌ Not XML")
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-def test_search_list():
-    print("\n--- Testing User Example (SearchList) ---")
-    url = "https://www.kcsc.re.kr/openApi/SearchList"
-
-    params = {
-        "Key": API_KEY,
-        "Keyword": "최소피복두께",
-        "Type": "KDS"
-    }
-
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=False)
-        
-        print("Status:", response.status_code)
-        print("Content Start:", response.text[:1000])
-        
-        if response.text.strip().startswith("<?xml"):
-            print("✅ XML Detected")
-            try:
-                data = xmltodict.parse(response.text)
-                print("Parsed Data Keys:", data.keys())
-            except Exception as e:
-                print(f"XML Parse Error: {e}")
-        else:
-            print("❌ Not XML")
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-def test_code_viewer_manual():
-    print("\n--- Testing CodeViewer Manual URL ---")
-    # Using a code that might exist. 142050 was used before.
-    full_url = f"https://www.kcsc.re.kr/openApi/CodeViewer?Key={API_KEY}&Type=KDS&Code=142050"
-    print(f"Testing Manual URL: {full_url}")
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(full_url, headers=headers, verify=False, timeout=10)
+        if "key" not in params and "Key" not in params:
+            params["key"] = API_KEY
+            
+        res = requests.get(BASE_URL, params=params, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        print(f"URL: {res.url}")
         print(f"Status: {res.status_code}")
-        print(f"Content Length: {len(res.content)}")
-        print(f"Content Start: {res.text[:500]}")
-        
-        if res.text.strip().startswith("<?xml"):
-             print("✅ XML Detected")
-        elif res.text.strip().startswith("<html"):
-             print("❌ HTML Detected")
+        print("Headers:", res.headers)
+        try:
+            data = res.json()
+            if isinstance(data, list):
+                print(f"Result Count: {len(data)}")
+                if len(data) > 0:
+                    print("First item sample:", data[0])
+            else:
+                print("Result is not a list:", str(data)[:200])
+        except:
+            print("Response is not JSON.")
+            print(res.text[:200])
     except Exception as e:
         print(f"Error: {e}")
+    print("\n")
 
-def test_code_list_manual():
-    print("\n--- Testing CodeList Manual URL ---")
-    # Using "14" as per user example
-    full_url = f"https://www.kcsc.re.kr/openApi/CodeList?Key={API_KEY}&Type=KDS&Code=14"
-    print(f"Testing Manual URL: {full_url}")
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(full_url, headers=headers, verify=False, timeout=10)
-        print(f"Status: {res.status_code}")
-        print(f"Content Length: {len(res.content)}")
-        print(f"Content Start: {res.text[:500]}")
-        
-        if res.text.strip().startswith("<?xml"):
-             print("✅ XML Detected")
-             try:
-                data = xmltodict.parse(res.text)
-                print("Parsed Data Keys:", data.keys())
-             except Exception as e:
-                print(f"XML Parse Error: {e}")
-        elif res.text.strip().startswith("<html"):
-             print("❌ HTML Detected")
-    except Exception as e:
-        print(f"Error: {e}")
+# 1. With pagination params
+test("1. Pagination", {"Type": "KDS", "pageNo": 1, "numOfRows": 10})
 
-if __name__ == "__main__":
-    # test_user_example()
-    # test_search_list()
-    # test_code_viewer_manual()
-    # test_code_list_manual()
-    
-    print("\n--- Testing SearchList Manual URL (Structure Check) ---")
-    full_url = f"https://www.kcsc.re.kr/openApi/SearchList?Key={API_KEY}&Keyword=콘크리트&Type=KDS"
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(full_url, headers=headers, verify=False, timeout=10)
-        print(f"Status: {res.status_code}")
-        if res.text.strip().startswith("<?xml"):
-             print("✅ XML Detected")
-             try:
-                data = xmltodict.parse(res.text)
-                print(json.dumps(data, indent=2, ensure_ascii=False)[:2000])
-             except Exception as e:
-                print(f"XML Parse Error: {e}")
-        else:
-             print(f"Content Start: {res.text[:500]}")
-    except Exception as e:
-        print(f"Error: {e}")
+# 2. HTTP instead of HTTPS
+BASE_URL_HTTP = "http://kcsc.re.kr/OpenApi/CodeList"
+print("--- Testing HTTP ---")
+try:
+    res = requests.get(BASE_URL_HTTP, params={"Type": "KDS", "key": API_KEY}, timeout=10)
+    print(f"URL: {res.url}")
+    print(f"Status: {res.status_code}")
+    print("Response:", res.text[:200])
+except Exception as e:
+    print(f"Error: {e}")
+
+# 3. Try 'serviceKey' with pagination (common pattern)
+test("3. serviceKey + Pagination", {"Type": "KDS", "serviceKey": API_KEY, "pageNo": 1, "numOfRows": 10})
