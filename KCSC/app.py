@@ -4,6 +4,10 @@ from bs4 import BeautifulSoup
 from openai import AzureOpenAI
 import time
 import re
+import json
+import uuid
+import os
+from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Optional, Dict, Tuple, List, Any
 
@@ -28,7 +32,72 @@ client = AzureOpenAI(
 )
 
 # =========================================================
-# 2) KCSC Client
+# 2) Chat Persistence Manager
+# =========================================================
+class ChatManager:
+    HISTORY_FILE = "chat_history.json"
+
+    @classmethod
+    def load_history(cls) -> Dict[str, Any]:
+        if not os.path.exists(cls.HISTORY_FILE):
+            return {}
+        try:
+            with open(cls.HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    @classmethod
+    def save_history(cls, history: Dict[str, Any]):
+        with open(cls.HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=2)
+
+    @classmethod
+    def get_session(cls, session_id: str) -> List[Dict[str, Any]]:
+        history = cls.load_history()
+        return history.get(session_id, {}).get("messages", [])
+
+    @classmethod
+    def save_message(cls, session_id: str, role: str, content: str):
+        history = cls.load_history()
+        if session_id not in history:
+            history[session_id] = {
+                "created_at": datetime.now().isoformat(),
+                "title": content[:20] + "..." if role == "user" else "New Chat",
+                "messages": []
+            }
+        
+        # 첫 사용자 메시지로 제목 업데이트
+        if role == "user" and len(history[session_id]["messages"]) == 0:
+             history[session_id]["title"] = content[:20] + "..."
+
+        history[session_id]["messages"].append({"role": role, "content": content})
+        cls.save_history(history)
+
+    @classmethod
+    def delete_session(cls, session_id: str):
+        history = cls.load_history()
+        if session_id in history:
+            del history[session_id]
+            cls.save_history(history)
+
+    @classmethod
+    def get_all_sessions(cls) -> List[Dict[str, Any]]:
+        history = cls.load_history()
+        sessions = []
+        for sid, data in history.items():
+            sessions.append({
+                "id": sid,
+                "title": data.get("title", "Untitled"),
+                "created_at": data.get("created_at", "")
+            })
+        # 최신순 정렬
+        sessions.sort(key=lambda x: x["created_at"], reverse=True)
+        return sessions
+
+
+# =========================================================
+# 3) KCSC Client
 # =========================================================
 class KCSCBot:
     """
@@ -313,22 +382,23 @@ class KCSCBot:
 # =========================================================
 st.set_page_config(page_title="KCSC 설계기준 챗봇", layout="wide")
 
-# Custom CSS for Gemini-like greeting
+# Custom CSS for Gemini-like greeting & Centered Layout
 st.markdown("""
 <style>
+    /* 1. Greeting Container Centering */
     .greeting-container {
         display: flex;
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center; /* Center horizontally */
         justify-content: center;
-        margin-top: 100px;
-        margin-left: 20px;
+        margin-top: 10vh;
         font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', sans-serif;
+        text-align: center;
     }
     .greeting-sub {
         font-size: 2.5rem;
         font-weight: 500;
-        color: #6e6e6e; /* Muted color for the first line */
+        color: #6e6e6e;
         margin-bottom: 10px;
         background: -webkit-linear-gradient(45deg, #4285f4, #9b72cb, #d96570);
         -webkit-background-clip: text;
@@ -338,9 +408,24 @@ st.markdown("""
     .greeting-main {
         font-size: 3.5rem;
         font-weight: 600;
-        color: #c4c7c5; /* Light gray for the main text */
+        color: #c4c7c5;
         line-height: 1.2;
     }
+    
+    /* 2. Chat Message Centering & Width Control */
+    .stChatMessage {
+        max-width: 800px; /* Limit width */
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+    
+    /* 3. Chat Input Centering */
+    .stChatInput {
+        max-width: 800px;
+        margin-left: auto !important;
+        margin-right: auto !important;
+    }
+
     /* Hide the default title if we are showing the greeting */
     .stApp header {
         background-color: transparent;
@@ -348,21 +433,50 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Remove default title to use the custom greeting
-# st.title("🏗️ 실시간 설계기준 AI 검색")
-
 bot = KCSCBot(KCSC_API_KEY)
+
+# Session Management
+if "current_session_id" not in st.session_state:
+    st.session_state.current_session_id = str(uuid.uuid4())
+
+# Load messages for current session
+st.session_state.messages = ChatManager.get_session(st.session_state.current_session_id)
 
 with st.sidebar:
     st.subheader("검색 설정")
-    # 공식 문서에는 KDS/KCS/KWCS 등이 보임.
     doc_type_selected = st.selectbox("기준 종류(Type)", ["KDS", "KCS", "KWCS"], index=1)
     top_k = st.slider("검색 후보 개수", 3, 30, 18, 1)
     debug = st.checkbox("디버그 보기", value=False)
     st.caption("※ 첫 실행 시 CodeList를 불러와 캐시합니다(최대 수 초).")
+    
+    st.divider()
+    
+    # Chat History UI
+    st.subheader("💬 대화 기록")
+    if st.button("➕ 새 대화 시작", use_container_width=True):
+        st.session_state.current_session_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.rerun()
+
+    sessions = ChatManager.get_all_sessions()
+    for s in sessions:
+        label = s["title"]
+        if s["id"] == st.session_state.current_session_id:
+            label = f"📌 {label}"
+        
+        col1, col2 = st.columns([0.8, 0.2])
+        if col1.button(label, key=f"btn_{s['id']}", help=s["created_at"]):
+            st.session_state.current_session_id = s["id"]
+            st.rerun()
+        if col2.button("🗑️", key=f"del_{s['id']}"):
+            ChatManager.delete_session(s["id"])
+            if st.session_state.current_session_id == s["id"]:
+                st.session_state.current_session_id = str(uuid.uuid4())
+            st.rerun()
 
 if debug:
     with st.sidebar.expander("디버그 정보", expanded=True):
+        st.write("Session ID:", st.session_state.current_session_id)
         try:
             items = bot.get_code_list(doc_type=doc_type_selected)
             st.write("CodeList 개수:", len(items))
@@ -371,10 +485,6 @@ if debug:
                 st.write("첫 항목 샘플:", items[0])
         except Exception as e:
             st.error(f"CodeList 로드 실패: {type(e).__name__}: {e}")
-
-# Initialize chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
@@ -393,6 +503,7 @@ if not st.session_state.messages:
 if user_input := st.chat_input("질문을 입력하세요"):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": user_input})
+    ChatManager.save_message(st.session_state.current_session_id, "user", user_input)
 
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -480,6 +591,8 @@ if user_input := st.chat_input("질문을 입력하세요"):
                 
                 # 응답 저장
                 st.session_state.messages.append({"role": "assistant", "content": full_response})
+                ChatManager.save_message(st.session_state.current_session_id, "assistant", full_response)
+                
                 st.info(f"출처: {doc_name or code_name} (KCSC {target_doc_type} / {code})")
 
                 with st.expander("🔎 검색 후보 보기"):
