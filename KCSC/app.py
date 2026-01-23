@@ -289,10 +289,23 @@ class KCSCBot:
             return self._get_first(it, code_keys, default="")
 
         if extracted_code:
-            # 코드 번호로 필터링 (포함 여부)
+            # 코드 번호로 필터링 (Code, FullCode 등 모든 가능성 체크)
             for it in items:
-                c = get_code(it).replace(" ", "").replace(".", "").replace("-", "")
-                if extracted_code in c:
+                # 검사할 후보 값들 수집
+                candidates = []
+                for k in ["Code", "code", "CODE", "FullCode", "fullCode"]:
+                    val = it.get(k)
+                    if val:
+                        candidates.append(str(val))
+                
+                matched = False
+                for c_val in candidates:
+                    c_clean = c_val.replace(" ", "").replace(".", "").replace("-", "")
+                    if extracted_code in c_clean:
+                        matched = True
+                        break
+                
+                if matched:
                     fast_track_results.append(it)
             
             # Fast Track 결과가 있으면 그것만 반환하거나 최상단에 배치
