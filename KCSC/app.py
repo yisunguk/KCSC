@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import urllib3
 from bs4 import BeautifulSoup
 from openai import AzureOpenAI
 import time
@@ -10,6 +11,9 @@ import os
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Optional, Dict, Tuple, List, Any
+
+# KCSC 서버 self-signed 인증서 경고 숨김
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # =========================================================
 # 1) Secrets / Clients
@@ -118,6 +122,7 @@ class KCSCBot:
         self.base_url = "https://kcsc.re.kr/OpenApi"
 
         self.session = requests.Session()
+        self.session.verify = False  # KCSC 서버 self-signed 인증서 대응
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Streamlit; KCSC-Client)",
             "Accept": "application/json, text/plain;q=0.9, */*;q=0.8",
@@ -128,10 +133,30 @@ class KCSCBot:
     def _strip_html(s: str) -> str:
         if not s:
             return ""
-        if "<" in s and ">" in s:
-            soup = BeautifulSoup(s, "html.parser")
-            return soup.get_text(separator="\n", strip=True)
-        return s
+        if "<" not in s or ">" not in s:
+            return s
+
+        soup = BeautifulSoup(s, "html.parser")
+
+        # HTML 테이블을 Markdown 테이블로 변환
+        for table in soup.find_all("table"):
+            md_rows: List[str] = []
+            rows = table.find_all("tr")
+            for i, row in enumerate(rows):
+                cells = row.find_all(["th", "td"])
+                cell_texts = [c.get_text(strip=True).replace("|", "/") for c in cells]
+                md_rows.append("| " + " | ".join(cell_texts) + " |")
+                if i == 0:
+                    md_rows.append("| " + " | ".join(["---"] * len(cell_texts)) + " |")
+            table.replace_with("\n" + "\n".join(md_rows) + "\n")
+
+        # 이미지 태그를 [그림] 플레이스홀더로 변환 (alt 텍스트 보존)
+        for img in soup.find_all("img"):
+            alt = img.get("alt", "").strip()
+            placeholder = f"[그림: {alt}]" if alt else "[그림]"
+            img.replace_with(placeholder)
+
+        return soup.get_text(separator="\n", strip=True)
 
     @staticmethod
     def _redact_key(text: str, key: str) -> str:
@@ -368,35 +393,189 @@ class KCSCBot:
         return cleaned
 
     # ---------- Code Viewer ----------
-    def get_content(self, code: str, doc_type: str = "KCS") -> Tuple[str, str]:
-        # 문서상 요청 변수: Type, Code, Key
+    def _fetch_raw_sections(self, code: str, doc_type: str) -> Tuple[str, List[Dict[str, Any]]]:
+        """API에서 원본 섹션 리스트를 가져온다. (code_name, sections)"""
         try:
-            data = self._get_json("CodeViewer", params={"Type": doc_type, "Code": code})
-        except Exception:
             data = self._get_json("", params={}, path=f"CodeViewer/{doc_type}/{code}")
+        except Exception:
+            data = self._get_json("CodeViewer", params={"Type": doc_type, "Code": code})
 
         if isinstance(data, list):
             if not data:
-                return "", ""
+                return "", []
             data = data[0]
 
         code_name = str(data.get("Name") or data.get("name") or "")
         lst = data.get("List") or data.get("list") or []
+        if not isinstance(lst, list):
+            lst = [{"title": "", "contents": str(lst)}]
+        return code_name, lst
 
+    def _sections_to_text(self, sections: List[Dict[str, Any]]) -> str:
+        """섹션 리스트를 텍스트로 변환"""
         parts: List[str] = []
-        if isinstance(lst, list):
-            for sec in lst:
-                title = str(sec.get("Title") or sec.get("title") or "").strip()
-                contents = sec.get("Contents") or sec.get("contents") or ""
-                contents = self._strip_html(str(contents))
-                if title:
-                    parts.append(f"## {title}\n{contents}".strip())
-                else:
-                    parts.append(contents.strip())
-        else:
-            parts.append(self._strip_html(str(lst)))
+        for sec in sections:
+            title = str(sec.get("Title") or sec.get("title") or "").strip()
+            # title에 포함된 HTML 이미지 태그 제거
+            title = re.sub(r"<img[^>]*>", "", title).strip()
+            contents = sec.get("Contents") or sec.get("contents") or ""
+            contents = self._strip_html(str(contents))
+            if title:
+                parts.append(f"## {title}\n{contents}".strip())
+            elif contents.strip():
+                parts.append(contents.strip())
+        return "\n\n".join([p for p in parts if p])
 
-        return code_name, "\n\n".join([p for p in parts if p])
+    @staticmethod
+    def _expand_tokens(tokens: List[str]) -> List[Tuple[str, float]]:
+        """
+        한국어 복합어를 서브토큰으로 분해하여 (token, weight) 리스트 반환.
+        원본 토큰은 높은 가중치, 서브토큰은 낮은 가중치.
+        예: "적설하중" → [("적설하중", 6), ("적설", 2), ("하중", 2)]
+        """
+        result: List[Tuple[str, float]] = []
+        seen: set = set()
+        for t in tokens:
+            t_low = t.lower()
+            if t_low not in seen:
+                # 원본 토큰 (길이 기반 가중치)
+                result.append((t_low, min(len(t), 6)))
+                seen.add(t_low)
+
+            # 3글자 이상이면 2글자 서브토큰 생성
+            if len(t) >= 3:
+                for j in range(len(t) - 1):
+                    sub = t[j:j+2].lower()
+                    if len(sub) >= 2 and sub not in seen:
+                        result.append((sub, 1.0))
+                        seen.add(sub)
+            # 4글자 이상이면 3글자 서브토큰 생성
+            if len(t) >= 4:
+                for j in range(len(t) - 2):
+                    sub = t[j:j+3].lower()
+                    if sub not in seen:
+                        result.append((sub, 2.0))
+                        seen.add(sub)
+        return result
+
+    def _extract_relevant_sections(
+        self, sections: List[Dict[str, Any]], query: str, keyword: str, max_chars: int = 15000
+    ) -> str:
+        """
+        사용자 질문과 관련된 섹션만 추출.
+        전체 문서가 max_chars 이하이면 그대로 반환하고,
+        초과하면 키워드 매칭 기반으로 관련 섹션을 선별한다.
+        """
+        full_text = self._sections_to_text(sections)
+        if len(full_text) <= max_chars:
+            return full_text
+
+        # 키워드 토큰 추출 (중복 제거)
+        combined = f"{query} {keyword}"
+        raw_tokens = [t for t in combined.split() if len(t) >= 2]
+        stopwords = {"에서", "이란", "무엇", "얼마", "어떻게", "대한", "대해", "알려줘",
+                      "설명해", "기준", "지역의", "지역", "대하여", "관한", "관련"}
+        seen: set = set()
+        unique_tokens: List[str] = []
+        for t in raw_tokens:
+            t_low = t.lower()
+            if t_low not in seen and t_low not in stopwords:
+                unique_tokens.append(t)
+                seen.add(t_low)
+
+        # 서브토큰 포함 확장
+        weighted_tokens = self._expand_tokens(unique_tokens)
+
+        # 각 섹션의 관련도 점수 계산
+        scored: List[Tuple[float, int, str]] = []
+        for i, sec in enumerate(sections):
+            title = str(sec.get("Title") or sec.get("title") or "")
+            title = re.sub(r"<img[^>]*>", "", title).strip()
+            contents_raw = str(sec.get("Contents") or sec.get("contents") or "")
+            contents_text = self._strip_html(contents_raw)
+            searchable = f"{title} {contents_text}".lower()
+
+            score = 0.0
+            matched_count = 0
+            for t_low, weight in weighted_tokens:
+                if t_low in searchable:
+                    score += weight
+                    matched_count += 1
+                    if t_low in title.lower():
+                        score += weight * 0.5
+
+            # 다중 매칭 보너스
+            if matched_count >= 3:
+                score *= (1.0 + 0.2 * matched_count)
+
+            if score > 0:
+                block = f"## {title}\n{contents_text}".strip() if title else contents_text.strip()
+                scored.append((score, i, block))
+
+        scored.sort(key=lambda x: (-x[0], x[1]))
+
+        # 상위 섹션 + 인접 섹션 포함 (전후 컨텍스트)
+        top_indices: set = set()
+        for _, idx, _ in scored[:20]:
+            top_indices.add(idx)
+            # 전후 1개 섹션도 포함 (연속된 내용일 수 있음)
+            if idx > 0:
+                top_indices.add(idx - 1)
+            if idx < len(sections) - 1:
+                top_indices.add(idx + 1)
+
+        # 인접 섹션의 블록 텍스트 생성
+        all_blocks: Dict[int, str] = {}
+        for _, idx, block in scored:
+            all_blocks[idx] = block
+        for idx in top_indices:
+            if idx not in all_blocks:
+                sec = sections[idx]
+                title = str(sec.get("Title") or sec.get("title") or "")
+                title = re.sub(r"<img[^>]*>", "", title).strip()
+                contents_text = self._strip_html(str(sec.get("Contents") or sec.get("contents") or ""))
+                block = f"## {title}\n{contents_text}".strip() if title else contents_text.strip()
+                all_blocks[idx] = block
+
+        # 점수 기반으로 선택 (인접 섹션은 원본 점수의 50%로 평가)
+        score_map: Dict[int, float] = {}
+        for s, idx, _ in scored:
+            score_map[idx] = s
+        candidates = []
+        for idx in top_indices:
+            s = score_map.get(idx, score_map.get(idx - 1, 0) * 0.5)
+            candidates.append((s, idx, all_blocks[idx]))
+        candidates.sort(key=lambda x: (-x[0], x[1]))
+
+        selected: List[Tuple[int, str]] = []
+        total_len = 0
+        for score, idx, block in candidates:
+            if not block.strip():
+                continue
+            if total_len + len(block) > max_chars:
+                remaining = max_chars - total_len
+                if remaining > 200:
+                    selected.append((idx, block[:remaining] + "\n... (이하 생략)"))
+                break
+            selected.append((idx, block))
+            total_len += len(block) + 2
+
+        if not selected:
+            return full_text[:max_chars]
+
+        selected.sort(key=lambda x: x[0])
+        return "\n\n".join([text for _, text in selected])
+
+    def get_content(self, code: str, doc_type: str = "KCS", query: str = "", keyword: str = "") -> Tuple[str, str]:
+        code_name, sections = self._fetch_raw_sections(code, doc_type)
+        if not sections:
+            return code_name, ""
+
+        if query or keyword:
+            content = self._extract_relevant_sections(sections, query, keyword)
+        else:
+            content = self._sections_to_text(sections)
+        return code_name, content
 
 
 # =========================================================
@@ -577,7 +756,10 @@ if user_input := st.chat_input("질문을 입력하세요"):
 
                 status.update(label="기준 본문 조회 중...", state="running")
                 # 여기서 target_doc_type을 써야 함 (Auto-Retry로 바뀌었을 수 있음)
-                doc_name, content = bot.get_content(code, doc_type=target_doc_type)
+                doc_name, content = bot.get_content(
+                    code, doc_type=target_doc_type,
+                    query=user_input, keyword=keyword
+                )
 
                 if not content.strip():
                     st.warning("기준 본문을 가져왔지만 내용이 비어 있습니다. 다른 코드로 재시도하세요.")
@@ -586,10 +768,11 @@ if user_input := st.chat_input("질문을 입력하세요"):
 
                 status.update(label="답변 생성 중...", state="running")
                 final_prompt = (
-                    f"기준서 내용:\n{content[:12000]}\n\n"
+                    f"기준서 내용 (질문과 관련된 섹션 발췌):\n{content[:15000]}\n\n"
                     f"질문: {user_input}\n\n"
                     "위 기준서 내용을 근거로, 실무자가 이해하기 쉽도록 요점 위주로 답변해줘. "
-                    "가능하면 '근거 문장(기준서 발췌)'도 함께 제시해줘."
+                    "가능하면 '근거 문장(기준서 발췌)'도 함께 제시해줘. "
+                    "[그림] 표시가 있으면 해당 그림/도표를 참조해야 한다고 안내해줘."
                 )
 
                 # 대화 기록 포함 (Context 유지)
