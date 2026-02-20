@@ -397,40 +397,14 @@ class KCSCBot:
         return cleaned
 
     def search_all_types(self, keyword: str, top_k: int = 10) -> Tuple[str, List[Dict[str, Any]]]:
-        """KDS, KCS, KWCS 전체를 검색하여 최적 결과와 doc_type을 반환"""
-        best_type = ""
-        best_results: List[Dict[str, Any]] = []
-        best_score = 0.0
-
-        name_keys = ["Name", "name", "TITLE", "Title"]
-        tokens = self._normalize_tokens(keyword)
-
-        for dtype in ["KDS", "KCS"]:
-            results = self.search_codes_local(keyword, doc_type=dtype, top_k=top_k)
-            if not results:
-                continue
-            # 최상위 결과의 스코어로 비교
-            top_name = self._get_first(results[0], name_keys, default="").lower()
-            score = 0.0
-            for t in tokens:
-                if t.lower() in top_name:
-                    if t in self._GENERIC_TERMS:
-                        score += 1
-                    else:
-                        score += max(len(t), 3)
-            if score > best_score:
-                best_score = score
-                best_type = dtype
-                best_results = results
-
-        # KWCS는 결과가 적은 편이라 KDS/KCS에서 못 찾았을 때만
-        if not best_results:
-            results = self.search_codes_local(keyword, doc_type="KWCS", top_k=top_k)
-            if results:
-                best_type = "KWCS"
-                best_results = results
-
-        return best_type, best_results
+        """전체 CodeList를 검색하여 최적 결과 반환. 각 항목의 codeType을 doc_type으로 사용."""
+        # CodeList는 Type 파라미터와 무관하게 KDS+KCS 모두 반환하므로 한 번만 호출
+        results = self.search_codes_local(keyword, doc_type="KDS", top_k=top_k)
+        if results:
+            # 최상위 결과의 codeType을 대표 타입으로 사용
+            best_type = str(results[0].get("codeType") or results[0].get("CodeType") or "KDS")
+            return best_type, results
+        return "", []
 
     # ---------- Code Viewer ----------
     def _fetch_raw_sections(self, code: str, doc_type: str) -> Tuple[str, List[Dict[str, Any]]]:
@@ -792,7 +766,7 @@ if user_input := st.chat_input("질문을 입력하세요"):
                     status.update(label="분석 완료", state="complete")
                     st.stop()
 
-                # 2) 본문 조회 (빈 응답이면 다음 후보로 fallback)
+                # 2) 본문 조회 (항목의 codeType 사용, 빈 응답이면 다음 후보로 fallback)
                 content = ""
                 code = ""
                 code_name = ""
@@ -800,14 +774,17 @@ if user_input := st.chat_input("질문을 입력하세요"):
                 for candidate in results[:5]:
                     code = str(candidate.get("Code") or candidate.get("code") or candidate.get("CODE") or candidate.get("FullCode") or candidate.get("fullCode") or "")
                     code_name = str(candidate.get("Name") or candidate.get("name") or candidate.get("TITLE") or candidate.get("Title") or "Unknown")
-                    st.write(f"📖 기준 조회 중: **{code_name}** (Code: {code})")
+                    # 항목 자체의 codeType을 우선 사용 (CodeViewer는 정확한 타입이 필요)
+                    item_type = str(candidate.get("codeType") or candidate.get("CodeType") or target_doc_type)
+                    st.write(f"📖 기준 조회 중: **{code_name}** ({item_type} {code})")
 
                     status.update(label=f"본문 조회 중... ({code_name})", state="running")
                     doc_name, content = bot.get_content(
-                        code, doc_type=target_doc_type,
+                        code, doc_type=item_type,
                         query=user_input, keyword=keyword
                     )
                     if content.strip():
+                        target_doc_type = item_type
                         break
                     st.warning(f"'{code_name}' 본문이 비어 있습니다. 다음 후보를 시도합니다...")
 
